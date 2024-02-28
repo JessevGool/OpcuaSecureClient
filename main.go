@@ -11,7 +11,9 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
+	"github.com/mitchellh/go-ps"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/url"
@@ -23,38 +25,22 @@ import (
 
 	"github.com/awcullen/opcua/client"
 	"github.com/awcullen/opcua/ua"
-
 	"github.com/pkg/errors"
 )
 
 func main() {
-
-	currentWD, err := os.Getwd()
-	batPath := currentWD + "/MiloServer/milo-demo-server/milo-demo-server/bin/milo-demo-server.bat"
-
-	if _, err := os.Stat(batPath); errors.Is(err, os.ErrNotExist) {
-		fmt.Printf("Unzipping miloserver...\n")
-		err := Unzip("./MiloServer/milo-demo-server-win.zip", "./MiloServer/milo-demo-server")
-		if err != nil {
-			println("Error while unzipping server")
-		}
-		fmt.Printf("Unzipping miloserver completed\n")
+	// Can be used to start the server, but you can just run the .bat file
+	log.Println("Starting Server....")
+	err := StartServer()
+	if err != nil {
+		fmt.Printf("Error occurred while starting server: %v", err)
+		os.Exit(1)
 	}
 
-	if _, err := os.Stat(batPath); errors.Is(err, os.ErrNotExist) {
-		println(batPath + " not found, unzip manually")
-	}
-	//Can be used to start the server, but you can just run the .bat file
-	//log.Println("Starting Server....")
-	//err := StartServer()
-	//if err != nil {
-	//	fmt.Printf("Eror occured while starting server: %v", err)
-	//	os.Exit(0)
-	//}
-	//log.Println("Server started")
+	log.Println("Server started")
 
 	if err := ensurePKI(); err != nil {
-		fmt.Println(errors.Wrap(err, "Error creating pki"))
+		fmt.Println(errors.Wrap(err, "Error creating PKI"))
 		os.Exit(1)
 	}
 	// check if server is listening at endpointURL
@@ -64,10 +50,13 @@ func main() {
 		"opc.tcp://localhost:62541/milo",
 		//client.WithUserNameIdentity("user1", "password"), // Username Password combination can be added
 		client.WithSecurityPolicyURI(ua.SecurityPolicyURIBasic256, ua.MessageSecurityModeSignAndEncrypt), // Depending on what the server accepts this policy can be changed
-		client.WithClientCertificatePaths("./pki/client.crt", "./pki/client.key"),                        // These will be auto generated at first launch, they will need to be put in the trusted folder of the Milo server
+		client.WithClientCertificatePaths("./pki/client.crt", "./pki/client.key"),                        // These will be auto-generated at first launch, they will need to be put in the trusted folder of the Milo server
 		client.WithInsecureSkipVerify(),
 	)
 	if err != nil {
+		if err == ua.BadSecureChannelClosed {
+			fmt.Printf("Client made connection with server but certificates were rejected\nPlease move the certificates from the rejected to trusted certs folder\nThe path should be along the lines of: C:\\Users\\<user>\\AppData\\Roaming\\digitalpetri\\Milo Demo Server\\data\\security\\pki\n")
+		}
 		fmt.Printf("Error: %v\n", err)
 		return
 	} else {
@@ -122,9 +111,14 @@ func main() {
 
 }
 
+// The server won't close by itself
 func StartServer() error {
 	currentWD, err := os.Getwd()
-	batPath := currentWD + "/MiloServer/milo-demo-server/milo-demo-server/bin/milo-demo-server.bat"
+	if err != nil {
+		return err
+	}
+
+	batPath := filepath.Join(currentWD, "MiloServer", "milo-demo-server", "milo-demo-server", "bin", "milo-demo-server.bat")
 
 	if _, err := os.Stat(batPath); errors.Is(err, os.ErrNotExist) {
 		fmt.Printf("Unzipping miloserver...\n")
@@ -138,13 +132,16 @@ func StartServer() error {
 	if _, err := os.Stat(batPath); errors.Is(err, os.ErrNotExist) {
 		return errors.New(batPath + " not found, unzip manually")
 	}
+	if isProcessRunning("cmd.exe") {
+		println("Server is already running...")
+		return nil
+	}
 
 	// Get the directory of the .bat file
 	batDir := filepath.Dir(batPath)
 
 	// Change the working directory to the .bat file directory
-	err = os.Chdir(batDir)
-	if err != nil {
+	if err := os.Chdir(batDir); err != nil {
 		return err
 	}
 
@@ -152,13 +149,12 @@ func StartServer() error {
 	cmd := exec.Command("cmd.exe", "/C", "start", batPath)
 
 	// Run the command
-	err = cmd.Start()
-	if err != nil {
-		// Handle error
-		panic(err)
+	if err := cmd.Start(); err != nil {
+		return err
 	}
 
 	time.Sleep(8 * time.Second)
+
 	return nil
 }
 
@@ -320,4 +316,18 @@ func Unzip(src, dest string) error {
 	}
 
 	return nil
+}
+
+func isProcessRunning(processName string) bool {
+	processes, err := ps.Processes()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return false
+	}
+	for _, p := range processes {
+		if p.Executable() == processName {
+			return true
+		}
+	}
+	return false
 }
