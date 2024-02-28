@@ -60,7 +60,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	} else {
-		println("Client connected")
+		log.Println("Client connected")
 	}
 
 	// Prepare read request
@@ -133,7 +133,7 @@ func StartServer() error {
 		return errors.New(batPath + " not found, unzip manually")
 	}
 	if isProcessRunning("cmd.exe") {
-		println("Server is already running...")
+		log.Println("Server is already running...")
 		return nil
 	}
 
